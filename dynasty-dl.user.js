@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Dynaster Scans Batch Downloader
+// @name         Dynasty Scans Batch Downloader
 // @namespace    mccranky83.github.io
 // @version      2024-10-22
 // @description  Download doujinshi from Dynasty Scans
@@ -29,19 +29,13 @@
       if (key === "count") {
         Reflect.get(tar, key) ? dl.show() : dl.hide();
       }
-      $("dd:first a").attr({
-        href: `javascript:dlAll(${JSON.stringify(selected.index)});`,
-      });
       return true;
     },
   };
   const selected = new Proxy({ count: 0, index: [] }, h);
-  $(".chapter-list dd").each((_, cur) => {
-    const origin = location.origin;
-    const pathname = $(cur).find("a:first").attr("href");
-    const src = `${origin}${pathname}`;
+  $(".chapter-list dd").each((i, cur) => {
     $("<a>", {
-      href: `javascript:dl('${src}');`,
+      href: `javascript:dl(${i.toString()});`,
       text: "Download",
       class: "label",
     }).appendTo(cur);
@@ -93,51 +87,56 @@
       display: "none",
     },
   }).appendTo("dd:first");
+  $("a:contains('Download all')").click(() => {
+    dlAll(selected);
+  });
 })();
 
-// Seperate downloads
-function dl() {}
+async function dl(i) {
+  const zip = new JSZip();
+  const name =
+    $(".tag-title b").text() +
+    "_" +
+    $("dd")
+      .eq(i + 1)
+      .find("a:first")
+      .text();
+  const folder = zip.folder(name);
+  const src =
+    location.origin + $("dd").slice(1).eq(i).find("a:first").attr("href");
+  const { pages, iframe } = await getPages(src);
+  iframe.remove();
+  // Need more flow control
+  await Promise.all(
+    pages.map(async (page) => {
+      const url = location.origin + page.image;
+      const filename = page.image.split("/").slice(-1)[0];
+      await fetch(url, { signal: AbortSignal.timeout(30_000) })
+        .then((res) => res.arrayBuffer())
+        .then((res) => {
+          folder.file(filename, res, { binary: true });
+        })
+        .catch(() => {});
+    }),
+  );
+  saveAs(
+    await zip.generateAsync({
+      type: "blob",
+      compression: "DEFLATE",
+      compressionOptions: {
+        level: 6,
+      },
+    }),
+    name,
+  );
+}
 
-async function dlAll(index) {
-  index.forEach(async (i) => {
-    const zip = new JSZip();
-    const name =
-      $(".tag-title b").text() +
-      "_" +
-      $("dd")
-        .eq(i + 1)
-        .find("a:first")
-        .text();
-    const folder = zip.folder(name);
-    const src =
-      location.origin + $("dd").slice(1).eq(i).find("a:first").attr("href");
-    const { pages, iframe } = await getPages(src);
-    iframe.remove();
-    // Need more flow control
-    await Promise.all(
-      pages.map(async (page) => {
-        const url = location.origin + page.image;
-        const filename = page.image.split("/").slice(-1)[0];
-        await fetch(url, { signal: AbortSignal.timeout(30_000) })
-          .then((res) => res.arrayBuffer())
-          .then((res) => {
-            folder.file(filename, res, { binary: true });
-          })
-          .catch(() => {});
-      }),
-    );
-    saveAs(
-      await zip.generateAsync({
-        type: "blob",
-        compression: "DEFLATE",
-        compressionOptions: {
-          level: 6,
-        },
-      }),
-      name,
-    );
-    $("dd input").prop("checked", false).trigger("change");
-    $("#dl-all").hide();
+async function dlAll(selected) {
+  selected.index.forEach(async (i) => {
+    await dl(i);
+    selected.count = 0;
+    selected.index = [];
+    $("dd input").prop("checked", false);
   });
 }
 
