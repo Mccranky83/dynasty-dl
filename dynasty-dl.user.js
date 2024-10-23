@@ -93,6 +93,11 @@
 })();
 
 async function dl(i) {
+  const dl = $("dd")
+    .eq(i + 1)
+    .find("a:last");
+  const text = dl.text();
+  dl.text("Loading...");
   const zip = new JSZip();
   const name =
     $(".tag-title b").text() +
@@ -129,6 +134,7 @@ async function dl(i) {
     }),
     name,
   );
+  dl.text(text);
 }
 
 async function dlAll(selected) {
