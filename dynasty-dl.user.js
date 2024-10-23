@@ -12,11 +12,33 @@
 // @license      MIT
 // ==/UserScript==
 
+class Semaphore {
+  constructor() {
+    this.counter = 200;
+    this.queue = [];
+  }
+  async acquire() {
+    this.counter > 0
+      ? this.counter--
+      : await new Promise((res) => {
+          this.queue.push(res);
+        });
+  }
+  release() {
+    if (this.queue.length > 0) {
+      this.queue.shift()();
+      this.counter--;
+    }
+    this.counter++;
+  }
+}
+
 (() => {
   "use strict";
 
   window.dl = dl;
   window.dlAll = dlAll;
+  const s = new Semaphore();
   const h = {
     get(tar, key) {
       const val = Reflect.get(tar, key);
@@ -35,12 +57,20 @@
   const selected = new Proxy({ count: 0, index: [] }, h);
   $(".chapter-list dd").each((i, cur) => {
     $("<a>", {
-      href: `javascript:dl(${i.toString()});`,
+      href: `javascript:;`,
       text: "Download",
       class: "label",
     }).appendTo(cur);
     $("<input>", { type: "checkbox", checked: false }).prependTo(cur);
   });
+  $("dd")
+    .slice(1)
+    .find("a:last")
+    .each((i, cur) => {
+      $(cur).click(() => {
+        dl(i + 1, s);
+      });
+    });
   $(".chapter-list").prepend(`
           <dd>
             <input type="checkbox">
@@ -88,11 +118,11 @@
     },
   }).appendTo("dd:first");
   $("a:contains('Download all')").click(() => {
-    dlAll(selected);
+    dlAll(selected, s);
   });
 })();
 
-async function dl(i) {
+async function dl(i, s) {
   const dl = $("dd")
     .eq(i + 1)
     .find("a:last");
@@ -111,17 +141,18 @@ async function dl(i) {
     location.origin + $("dd").slice(1).eq(i).find("a:first").attr("href");
   const { pages, iframe } = await getPages(src);
   iframe.remove();
-  // Need more flow control
   await Promise.all(
     pages.map(async (page) => {
       const url = location.origin + page.image;
       const filename = page.image.split("/").slice(-1)[0];
+      await s.acquire();
       await fetch(url, { signal: AbortSignal.timeout(30_000) })
         .then((res) => res.arrayBuffer())
         .then((res) => {
           folder.file(filename, res, { binary: true });
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(s.release.bind(s));
     }),
   );
   saveAs(
@@ -137,9 +168,9 @@ async function dl(i) {
   dl.text(text);
 }
 
-async function dlAll(selected) {
+async function dlAll(selected, s) {
   selected.index.forEach(async (i) => {
-    await dl(i);
+    await dl(i, s);
     selected.count = 0;
     selected.index = [];
     $("dd input").prop("checked", false);
